@@ -421,7 +421,6 @@ function auctioninc_shippingcalc_module_load() {
     	                if (empty($shipRates['ErrorList'])) {
     	                    $use_fallback = true;
     	                } else {
-                            var_dump($shipRates);die();
     	                    foreach ($shipRates['ErrorList'] as $error) {
     	                        // Check for proper error code
     	                        if ($error['Message'] == 'Packaging Engine unable to determine any services to be rated') {
