@@ -12,7 +12,8 @@
 
 $incPath = dirname(__FILE__);
 include_once("$incPath/ShipRateSocketPost.inc");
-include_once("$incPath/ShipRateParserXML.inc");include_once("$incPath/ShipRateParserXMLItem.inc");
+include_once("$incPath/ShipRateParserXML.inc");
+include_once("$incPath/ShipRateParserXMLItem.inc");
 
 /**
  * API Main Class
@@ -26,7 +27,6 @@ class ShipRateAPI
 {
    var $rateReq;  
    var $results; 
-   var $xml;   
    var $accountId;               // Access Key to Web API
    var $refCode;                 // Reference code that is logged with each call - used for auditing when 
                                  // integrator is working with different customers
@@ -73,7 +73,7 @@ class ShipRateAPI
     */
    function GetItemShipRateSS(& $shipRateArray )
    {
-      $reqXML = $this->_makeGetItemShipRateSS_XML();
+      $reqXML = $this->_makeGetItemShipRateSS_XML(); 
       return $this->_GetItemShipRate($reqXML, $shipRateArray);
    }
 
@@ -95,39 +95,10 @@ class ShipRateAPI
       $post->setDebug($this->debugComm);
      
       if ($post->post($reqXML, false, $respXML, $headers, $errorMsg)) { 
-        $start  = strpos($respXML, "<?");
-        $length = strpos($respXML, "</Envelope>")-$start+strlen("</Envelope>");
-        $respXML = substr($respXML, $start, $length);
-        
-        $this->xml->loadXML($respXML);
-        $respXMLArray = $this->dom_to_array($this->xml->documentElement);
-
-        if ($this->xml->getElementsByTagName("ErrorList")->length == 0) { // no errors
-          $respXMLArray = $respXMLArray['Body']['ItemShipRate'];
-          $shipRateArray = array_pop($respXMLArray);
-          $i=0;
-          foreach ($shipRateArray['ShipRate'] as $shipRate) {
-            foreach ($shipRate['PackageDetail']['Package'] as $pkg) {
-              if(is_array($pkg)) {
-                $tmp = $pkg['PkgItem'];
-                $pkg['PkgItem'] = array();
-                $pkg['PkgItem'][] = $tmp;
-                $shipRateArray['ShipRate'][$i]['PackageDetail']['Package'] = $pkg;
-              }
-            }
-            $i++;
-          }
-          $shipRateArray = array_merge_recursive($respXMLArray, $shipRateArray);
-          return true;
-        } else {
-          $shipRateArray = $respXMLArray['Body'];
-          $tmp = array();
-          foreach ($shipRateArray['ErrorList'] as $error) {
-            $tmp[] = $error;
-          }
-          $shipRateArray['ErrorList'] = $tmp;
-          return false;
-        }
+         $p = new ShipRateParserXMLItem();
+         $respXML = substr($respXML, strpos($respXML, "<?"), strpos($respXML, "</Envelope>"));
+         $shipRateArray = $p->parse($respXML);
+         return (! isset($shipRateArray['ErrorList']) ); 
       } else {
          // Set an error
          $shipRateArray = $this->_createError(505, $errorMsg);
@@ -189,7 +160,6 @@ class ShipRateAPI
       $this->rateReq['Currency'] = 'USD';
       $this->rateReq['DetailLevel'] = 1;
       $this->setAccountId($this->accountId);
-      $this->xml = new DOMDocument('1.0', 'utf-8');
    }
    
    /**
@@ -511,221 +481,173 @@ class ShipRateAPI
 
    function _makeGetItemShipRateXS_XML()
    {
-      $env = $this->xml->createElement("Envelope");
-      $this->_makeXML_header($env);
-
-      $body = $this->xml->createElement("Body");
-      $xs = $this->xml->createElement("GetItemShipRateXS");
-      $xs->setAttribute("version", "2.3");
-      $xs->appendChild($this->xml->createElement("Currency", $this->rateReq['Currency']));
-      $xs->appendChild($this->xml->createElement("DetailLevel", $this->rateReq['DetailLevel']));    
-
-      $this->_makeXML_destination($xs);
-      $this->_makeXML_origin($xs);
-      $this->_makeXML_itemList($xs);
-      $this->_makeXML_carrierList($xs);
-
-      $body->appendChild($xs);
-      $env->appendChild($body);
-      $this->xml->appendChild($env);
-      return $this->xml->saveXML();
+      $head = $this->_makeXML_header();
+      $body = '<Body><GetItemShipRateXS version="2.3">'.
+              '<Currency>'.$this->rateReq['Currency'].'</Currency>'.
+              '<DetailLevel>'.$this->rateReq['DetailLevel'].'</DetailLevel>'.
+              $this->_makeXML_destination().
+              $this->_makeXML_origin().
+              $this->_makeXML_itemList().
+              $this->_makeXML_carrierList().
+              '</GetItemShipRateXS></Body>';
+      return ('<?xml version="1.0" encoding="utf-8" ?><Envelope>'.$head.$body.'</Envelope>');
    }
 
    function _makeGetItemShipRateSS_XML()
    {
-      $env = $this->xml->createElement("Envelope");
-      $this->_makeXML_header($env);
-
-      $body = $this->xml->createElement("Body");
-      $ss = $this->xml->createElement("GetItemShipRateSS");
-      $ss->setAttribute("version", "2.3");
-      $ss->appendChild($this->xml->createElement("Currency", $this->rateReq['Currency']));
-      $ss->appendChild($this->xml->createElement("DetailLevel", $this->rateReq['DetailLevel']));   
-
-      $this->_makeXML_destination($ss);
-      $this->_makeXML_itemList($ss);
-
-      $body->appendChild($ss);
-      $env->appendChild($body);
-      $this->xml->appendChild($env);
-      return $this->xml->saveXML();
+      $head = $this->_makeXML_header();
+      $body = '<Body><GetItemShipRateSS version="2.3">'.
+              '<Currency>'.$this->rateReq['Currency'].'</Currency>'.
+              '<DetailLevel>'.$this->rateReq['DetailLevel'].'</DetailLevel>'.             
+              $this->_makeXML_destination().
+              $this->_makeXML_itemList().
+              '</GetItemShipRateSS></Body>';
+      return ('<?xml version="1.0" encoding="utf-8" ?><Envelope>'.$head.$body.'</Envelope>');
    }
 
-   function _makeXML_header($parent) {
-      $head = $this->xml->createElement("Header");
-      
-      $head->appendChild($this->xml->createElement("AccountId", $this->accountId));
-      
-      if(!empty($this->refCode)) {
-        $head->appendChild($this->xml->createElement("RefCode", $this->refCode));
-      }
-      
-      $parent->appendChild($head);
+   function _makeXML_header() {
+      $head = '<Header>' . 
+         "<AccountId>{$this->accountId}</AccountId>" . 
+         (! empty($this->refCode) ? "<RefCode>{$this->refCode}</RefCode>" : '') .
+         '</Header>';
+      return $head;
    }
    
-   function _makeXML_destination($parent)
+   function _makeXML_destination()
    {
-      $dstaddr = $this->xml->createElement("DestinationAddress");
-
-      $dstaddr->appendChild($this->xml->createElement("ResidentialDelivery", ($this->rateReq['DestinationAddress']['Residential'] ? 'true' : 'false')));
-      $dstaddr->appendChild($this->xml->createElement("CountryCode", $this->rateReq['DestinationAddress']['CountryCode']));
-      $dstaddr->appendChild($this->xml->createElement("StateOrProvinceCode", $this->rateReq['DestinationAddress']['StateOrProvinceCode']));
-      $dstaddr->appendChild($this->xml->createElement("PostalCode", $this->rateReq['DestinationAddress']['PostalCode']));
-
-      $parent->appendChild($dstaddr);
+      $xml = '<DestinationAddress>'.
+             '<ResidentialDelivery>'.($this->rateReq['DestinationAddress']['Residential'] ? 'true' : 'false').'</ResidentialDelivery>'.
+             '<CountryCode>'.$this->rateReq['DestinationAddress']['CountryCode'].'</CountryCode>'.
+             '<StateOrProvinceCode>'.$this->rateReq['DestinationAddress']['StateOrProvinceCode'].'</StateOrProvinceCode>'.
+             '<PostalCode>'.$this->rateReq['DestinationAddress']['PostalCode'].'</PostalCode>'.
+             '</DestinationAddress>';
+      return ($xml);
    }
 
-   function _makeXML_origin($parent)
+   function _makeXML_origin()
    {
-      $cnt = count($this->rateReq['OriginAddressList']);
-      $addrlst = $this->xml->createElement("OriginAddressList");
-      
+      $cnt  = count($this->rateReq['OriginAddressList']);
+      $xml  = '<OriginAddressList>';
       for ($i = 0; $i < $cnt; $i++) {
-          $addr = $this->xml->createElement("OriginAddress");
+          $xml .= '<OriginAddress>'.
+                  '<OriginCode>'.$this->rateReq['OriginAddressList'][$i]['OriginCode'].'</OriginCode>'.
+                  '<CountryCode>'.$this->rateReq['OriginAddressList'][$i]['CountryCode'].'</CountryCode>'.
+                  '<StateOrProvinceCode>'.$this->rateReq['OriginAddressList'][$i]['StateOrProvinceCode'].'</StateOrProvinceCode>'.
+                  '<PostalCode>'.$this->rateReq['OriginAddressList'][$i]['PostalCode'].'</PostalCode>'.
+                  '</OriginAddress>';
 
-          $addr->appendChild($this->xml->createElement("OriginCode", $this->rateReq['OriginAddressList'][$i]['OriginCode']));
-          $addr->appendChild($this->xml->createElement("CountryCode", $this->rateReq['OriginAddressList'][$i]['CountryCode']));
-          $addr->appendChild($this->xml->createElement("StateOrProvinceCode", $this->rateReq['OriginAddressList'][$i]['StateOrProvinceCode']));
-          $addr->appendChild($this->xml->createElement("PostalCode", $this->rateReq['OriginAddressList'][$i]['PostalCode']));
-          
-          $addrlst->appendChild($addr);
       }
-     
-      $parent->appendChild($addrlst);
+      $xml .= '</OriginAddressList>';
+      return ($xml);
    }
 
-   function _makeXML_itemList($parent)
+   function _makeXML_itemList()
    {
-      $cnt = count($this->rateReq['ItemList']);
-      $itmlst = $this->xml->createElement("ItemList");
+      $cnt  = count($this->rateReq['ItemList']);
+      $xml  = '<ItemList>';
       for ($i = 0; $i < $cnt; $i++) {
-          $item = $this->xml->createElement("Item");
-
-          $item->appendChild($this->xml->createElement("RefCode", $this->rateReq['ItemList'][$i]['RefCode']));
-          $item->appendChild($this->xml->createElement("Quantity", $this->rateReq['ItemList'][$i]['Quantity']));
-          $clcmthd = $this->xml->createElement("CalcMethod");
-          $clcmthd->setAttribute("code", $this->rateReq['ItemList'][$i]['CalcMethod']);
-
-          if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'C' || $this->rateReq['ItemList'][$i]['CalcMethod'] === 'CI') {
-            $carrier = $this->xml->createElement("CarrierCalcProps");
-
-            $carrier->appendChild($this->xml->createElement("Weight", $this->rateReq['ItemList'][$i]['Weight']));
-            $carrier->appendChild($this->xml->createElement("WeightUOM", $this->rateReq['ItemList'][$i]['WeightUOM']));
-            $carrier->appendChild($this->xml->createElement("Length", $this->rateReq['ItemList'][$i]['Length']));
-            $carrier->appendChild($this->xml->createElement("Width", $this->rateReq['ItemList'][$i]['Width']));
-            $carrier->appendChild($this->xml->createElement("Height", $this->rateReq['ItemList'][$i]['Height']));
-            $carrier->appendChild($this->xml->createElement("DimUOM", $this->rateReq['ItemList'][$i]['DimUOM']));
-            $carrier->appendChild($this->xml->createElement("DeclaredValue", $this->rateReq['ItemList'][$i]['DeclaredValue']));
-            $carrier->appendChild($this->xml->createElement("PackMethod", $this->rateReq['ItemList'][$i]['PackMethod']));
-
-            if(isset($this->rateReq['ItemList'][$i]['LotSize'])) {
-              $carrier->appendChild($this->xml->createElement("LotSize", $this->rateReq['ItemList'][$i]['LotSize']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['OriginCode'])) {
-              $carrier->appendChild($this->xml->createElement("OriginCode", $this->rateReq['ItemList'][$i]['OriginCode']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['SuppHandlingCode'])) {
-              $carrier->appendChild($this->xml->createElement("SuppHandlingCode", $this->rateReq['ItemList'][$i]['SuppHandlingCode']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['SuppHandlingFee'])) {
-              $carrier->appendChild($this->xml->createElement("SuppHandlingFee", $this->rateReq['ItemList'][$i]['SuppHandlingFee']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['OnDemandServices'])){   
-              $cnt_od  = count($this->rateReq['ItemList'][$i]['OnDemandServices']); 
-              if ($cnt_od > 0){
-                 $ondemand = $this->xml->createElement("OnDemandServices");
-                 for ($j = 0; $j < $cnt_od; $j++) {
-                    $ondemand->appendChild($this->xml->createElement("ODService", $this->rateReq['ItemList'][$i]['OnDemandServices'][$j]));
+          $xml .= '<Item>'.
+                  '<RefCode>'.$this->rateReq['ItemList'][$i]['RefCode'].'</RefCode>'.
+                  '<Quantity>'.$this->rateReq['ItemList'][$i]['Quantity'].'</Quantity>'.
+                  '<CalcMethod code="'.$this->rateReq['ItemList'][$i]['CalcMethod'].'">';
+             if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'C' ||
+               $this->rateReq['ItemList'][$i]['CalcMethod'] === 'CI') {
+                $xml .= '<CarrierCalcProps>'.
+                    '<Weight>'.$this->rateReq['ItemList'][$i]['Weight'].'</Weight>'.
+                    '<WeightUOM>'.$this->rateReq['ItemList'][$i]['WeightUOM'].'</WeightUOM>'.
+                    '<Length>'.$this->rateReq['ItemList'][$i]['Length'].'</Length>'.
+                    '<Width>'.$this->rateReq['ItemList'][$i]['Width'].'</Width>'.
+                    '<Height>'.$this->rateReq['ItemList'][$i]['Height'].'</Height>'.
+                    '<DimUOM>'.$this->rateReq['ItemList'][$i]['DimUOM'].'</DimUOM>'.
+                    '<DeclaredValue>'.$this->rateReq['ItemList'][$i]['DeclaredValue'].'</DeclaredValue>'.
+                    '<PackMethod>'.$this->rateReq['ItemList'][$i]['PackMethod'].'</PackMethod>'.
+                    (isset($this->rateReq['ItemList'][$i]['LotSize']) ? '<LotSize>'.$this->rateReq['ItemList'][$i]['LotSize'].'</LotSize>' : '') .
+                    (isset($this->rateReq['ItemList'][$i]['OriginCode']) ? '<OriginCode>'.$this->rateReq['ItemList'][$i]['OriginCode'].'</OriginCode>' : '') .
+                    (isset($this->rateReq['ItemList'][$i]['SuppHandlingCode']) ? '<SuppHandlingCode>'.$this->rateReq['ItemList'][$i]['SuppHandlingCode'].'</SuppHandlingCode>' : '') .
+                    (isset($this->rateReq['ItemList'][$i]['SuppHandlingFee']) ? '<SuppHandlingFee>'.$this->rateReq['ItemList'][$i]['SuppHandlingFee'].'</SuppHandlingFee>' : '') ;
+                 if (isset($this->rateReq['ItemList'][$i]['OnDemandServices'])){   
+                    $cnt_od  = count($this->rateReq['ItemList'][$i]['OnDemandServices']); 
+                    if ($cnt_od > 0){
+                       $xml .= '<OnDemandServices>';
+                       for ($j = 0; $j < $cnt_od; $j++) {
+                          $xml .= '<ODService>'.$this->rateReq['ItemList'][$i]['OnDemandServices'][$j].'</ODService>';       
+                       } 
+                       $xml .= '</OnDemandServices>';    
+                    } 
                  } 
-                 $carrier->appendChild($ondemand);  
-              } 
-            }
-            if(isset($this->rateReq['ItemList'][$i]['SpecialServices'])) {
-              $cnt_ss  = count($this->rateReq['ItemList'][$i]['SpecialServices']); 
-              if ($cnt_ss > 0){
-                 $special = $this->xml->createElement("SpecialServices");
-                 for ($j = 0; $j < $cnt_ss; $j++) {
-                    $special->appendChild($this->xml->createElement($this->rateReq['ItemList'][$i]['SpecialServices'][$j], "TRUE"));     
+                 
+                 if (isset($this->rateReq['ItemList'][$i]['SpecialServices'])){
+                    $cnt_ss  = count($this->rateReq['ItemList'][$i]['SpecialServices']); 
+                    if ($cnt_ss > 0){
+                       $xml .= '<SpecialServices>';
+                       for ($j = 0; $j < $cnt_ss; $j++) {
+                          $xml .= '<'.$this->rateReq['ItemList'][$i]['SpecialServices'][$j].'>TRUE</'.$this->rateReq['ItemList'][$i]['SpecialServices'][$j].'>';       
+                       } 
+                       $xml .= '</SpecialServices>';    
+                    } 
                  } 
-                 $carrier->appendChild($special);    
-              } 
-            } 
-
-            $clcmthd->appendChild($carrier);
-          } else if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'F') {
-            $fixed = $this->xml->createElement("FixedCalcProps");
-
-            $fixed->appendChild($this->xml->createElement("FeeType", $this->rateReq['ItemList'][$i]['FeeType']));
-            if(isset($this->rateReq['ItemList'][$i]['Fee1'])) {
-              $fixed->appendChild($this->xml->createElement("Fee1", $this->rateReq['ItemList'][$i]['Fee1']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['Fee2'])) {
-              $fixed->appendChild($this->xml->createElement("Fee2", $this->rateReq['ItemList'][$i]['Fee2']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['FeeCode'])) {
-              $fixed->appendChild($this->xml->createElement("FeeCode", $this->rateReq['ItemList'][$i]['FeeCode']));
-            }
-            if(isset($this->rateReq['ItemList'][$i]['OriginCode'])) {
-              $fixed->appendChild($this->xml->createElement("OriginCode", $this->rateReq['ItemList'][$i]['OriginCode']));
-            }
-
-            $clcmthd->appendChild($fixed);
-          } else if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'N') {
+                 $xml .=   '</CarrierCalcProps>';
+             } else if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'F') {
+                $xml .= '<FixedCalcProps>'.
+                        '<FeeType>'.$this->rateReq['ItemList'][$i]['FeeType'].'</FeeType>'.
+                        (isset($this->rateReq['ItemList'][$i]['Fee1']) ? '<Fee1>'.$this->rateReq['ItemList'][$i]['Fee1'].'</Fee1>' : '') . 
+                        (isset($this->rateReq['ItemList'][$i]['Fee2']) ? '<Fee2>'.$this->rateReq['ItemList'][$i]['Fee2'].'</Fee2>' : '') . 
+                        (isset($this->rateReq['ItemList'][$i]['FeeCode']) ? '<FeeCode>'.$this->rateReq['ItemList'][$i]['FeeCode'].'</FeeCode>' : '') .   
+                        (isset($this->rateReq['ItemList'][$i]['OriginCode']) ? '<OriginCode>'.$this->rateReq['ItemList'][$i]['OriginCode'].'</OriginCode>' : '') .                    
+                        '</FixedCalcProps>';
+             } else if ($this->rateReq['ItemList'][$i]['CalcMethod'] === 'N') {
                 // nothing to add
-          }
-
-          $item->appendChild($clcmthd);
-          $itmlst->appendChild($item);
+             }
+          $xml .= '</CalcMethod>';
+          $xml .= '</Item>';
+                  
       }   
-      $parent->appendChild($itmlst);
+      $xml .= '</ItemList>';
+      return ($xml);
+
    }
 
-   function _makeXML_carrierList($parent)
+   function _makeXML_carrierList()
    {
       $cnt  = count($this->rateReq['CarrierList']);
-      $carrierlst = $this->xml->createElement("CarrierList");
+      $xml  = '<CarrierList>';
       foreach ($this->rateReq['CarrierList'] AS $key => $val) {
          // Make certain that we have both carrier and service codes defined
          if (isset($val['ServiceList']) && sizeof($val['ServiceList']) > 0) {
-            $carrier = $this->xml->createElement("Carrier");
-
-            $carrier->setAttribute("code", $key);
-            $carrier->appendChild($this->xml->createElement("EntryPoint", $val['EntryPoint']));
+            $xml .= '<Carrier code="'.$key.'">'.
+                    '<EntryPoint>'.$val['EntryPoint'].'</EntryPoint>';
             if ($key === 'DHL') {
-              if (isset($val['AccessKey'])) { 
-                $carrier->appendChild($this->xml->createElement("AccessKey", $val['AccessKey']));
-              }
-              if (isset($val['AcctCountryCode'])) {
-                $carrier->appendChild($this->xml->createElement("AcctCountryCode", $val['AcctCountryCode']));
-              }
+               if (isset($val['AccessKey'])) $xml .= '<AccessKey>'.$val['AccessKey'].'</AccessKey>';
+               if (isset($val['AcctCountryCode'])) $xml .= '<AcctCountryCode>'.$val['AcctCountryCode'].'</AcctCountryCode>';
             }
             if (array_key_exists($key, $this->flatRateFlag)) {
-              $carrier->appendChild($this->xml->createElement("FlatRatePackaging", $this->flatRateFlag[$key]));
+                $xml .= '<FlatRatePackaging>'.$this->flatRateFlag[$key].'</FlatRatePackaging>';
             }
-            $svclst = $this->xml->createElement("ServiceList");
+            $xml .= '<ServiceList>';
             for ($i = 0, $c = count($val['ServiceList']); $i < $c; $i++) {
-              $svc = $this->xml->createElement("Service");
-              $svc->setAttribute("code", $val['ServiceList'][$i]['Code']);              
-              if ($val['ServiceList'][$i]['OnDemand']  || array_key_exists($val['ServiceList'][$i]['Code'], $this->maxWeights) || array_key_exists($val['ServiceList'][$i]['Code'], $this->maxLengths)) {
+               if ($val['ServiceList'][$i]['OnDemand']  || array_key_exists($val['ServiceList'][$i]['Code'], $this->maxWeights) 
+                || array_key_exists($val['ServiceList'][$i]['Code'], $this->maxLengths)) {
+                  $xml .= '<Service code="'.$val['ServiceList'][$i]['Code'].'">';
                   if (array_key_exists($val['ServiceList'][$i]['Code'], $this->maxWeights)){ 
-                    $svc->appendChild($this->xml->createElement("PkgMaxWeight", $this->maxWeights[$val['ServiceList'][$i]['Code']]));
+                    $xml .= '<PkgMaxWeight>'.$this->maxWeights[$val['ServiceList'][$i]['Code']].'</PkgMaxWeight>';  
                   }                
                   if (array_key_exists($val['ServiceList'][$i]['Code'], $this->maxLengths)){ 
-                    $svc->appendChild($this->xml->createElement("PkgMaxLength", $this->maxLengths[$val['ServiceList'][$i]['Code']]));
-                    $svc->appendChild($this->xml->createElement("PkgMaxWidth", $this->maxWidths[$val['ServiceList'][$i]['Code']]));
-                    $svc->appendChild($this->xml->createElement("PkgMaxHeight", $this->maxHeights[$val['ServiceList'][$i]['Code']]));                     
+                     $xml .= '<PkgMaxLength>'.$this->maxLengths[$val['ServiceList'][$i]['Code']].'</PkgMaxLength>';   
+                     $xml .= '<PkgMaxWidth>'.$this->maxWidths[$val['ServiceList'][$i]['Code']].'</PkgMaxWidth>';   
+                     $xml .= '<PkgMaxHeight>'.$this->maxHeights[$val['ServiceList'][$i]['Code']].'</PkgMaxHeight>';   
                   }                                              
-                  if ($val['ServiceList'][$i]['OnDemand']) {
-                    $svc->appendChild($this->xml->createElement("OnDemand", "true"));
-                  }
-              }
-              $svclst->appendChild($svc);
+                  if ($val['ServiceList'][$i]['OnDemand']) $xml .= '<OnDemand>true</OnDemand>';
+                  $xml .= '</Service>';
+               } else {
+                  $xml .= '<Service code="'.$val['ServiceList'][$i]['Code'].'" />';
+               }
             }
-            $carrier->appendChild($svclst);
-            $carrierlst->appendChild($carrier);
+            $xml .= '</ServiceList>';
+            $xml .= '</Carrier>'; 
          }
       }
-      $parent->appendChild($carrierlst);
+      $xml .= '</CarrierList>';
+      return ($xml);
    }
    
    /**
@@ -744,64 +666,6 @@ class ShipRateAPI
             );
       return $error;
    }
-
-  function dom_to_array($root) 
-  {
-    $result = array(); 
-
-    if ($root->hasAttributes()) 
-    { 
-        $attrs = $root->attributes; 
-
-        foreach ($attrs as $i => $attr) 
-            $result[$attr->name] = $attr->value; 
-    } 
-
-    if ($root->hasChildNodes()) {
-      $children = $root->childNodes; 
-
-      if ($children->length == 1) 
-      { 
-          $child = $children->item(0); 
-
-          if ($child->nodeType == XML_TEXT_NODE) 
-          { 
-             $result['_value'] = $child->nodeValue;
-
-              if (count($result) == 1) {
-                  return $result['_value']; 
-              }
-              else 
-                  return $result;
-          } 
-      } 
-
-      $group = array(); 
-
-      for($i = 0; $i < $children->length; $i++) 
-      { 
-          $child = $children->item($i);
-
-          if($child->nodeType != XML_TEXT_NODE) { 
-
-            if (!isset($result[$child->nodeName]))
-                $result[$child->nodeName] = $this->dom_to_array($child); 
-            else 
-            { 
-                if (!isset($group[$child->nodeName])) 
-                { 
-                    $tmp = $result[$child->nodeName]; 
-                    $result[$child->nodeName] = array($tmp); 
-                    $group[$child->nodeName] = 1; 
-                } 
-                $result[$child->nodeName][] = $this->dom_to_array($child); 
-            } 
-          }
-      } 
-  }
-  return $result; 
-} 
-
    
 }
 
