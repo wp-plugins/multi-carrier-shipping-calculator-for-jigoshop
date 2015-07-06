@@ -3,7 +3,7 @@
  * Plugin Name: AuctionInc ShippingCalc for Jigoshop
  * Description: Accurate multi-carrier real-time shipping rates from FedEx, USPS, UPS, and DHL. Multiple ship origins, many advanced features. Free two week trial. No carrier accounts required.
  * Plugin URI: http://auctioninc.com/
- * Author: auctioninc.com
+ * Author: AuctionInc
  * Author URI: http://auctioninc.com
  * Version: 1.0
  **/
